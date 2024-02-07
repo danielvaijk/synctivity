@@ -1,5 +1,3 @@
-# Build
-/target
-
-# Misc
+.idea
+target
 .DS_Store
