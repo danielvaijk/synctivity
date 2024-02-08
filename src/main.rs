@@ -1,5 +1,5 @@
 use clap::{Parser, ValueHint};
-use git2::Repository;
+use git2::{Commit, Repository};
 use regex::Regex;
 use std::path::Path;
 
@@ -60,6 +60,55 @@ fn get_repositories_in_dir(dir: &Path) -> Vec<Repository> {
     repositories
 }
 
+fn get_commits_by_email<'repo>(
+    repository: &'repo Repository,
+    emails: &[String],
+) -> (u32, Vec<Commit<'repo>>) {
+    let mut walker = match repository.revwalk() {
+        Ok(value) => value,
+        Err(error) => panic!("failed to create revision walker: {}", error),
+    };
+
+    if let Err(error) = walker.push_head() {
+        panic!(
+            "failed to add HEAD commit to revision walker for traversal: {}",
+            error
+        );
+    }
+
+    let mut revision_count: u32 = 0;
+    let mut found_commits = Vec::new();
+
+    for revision in walker {
+        let oid = match revision {
+            Ok(value) => value,
+            Err(error) => panic!("failed to get OID from revision: {}", error),
+        };
+
+        let commit = match repository.find_commit(oid) {
+            Ok(value) => value,
+            Err(error) => panic!("failed to find commit with OID {}: {}", oid, error),
+        };
+
+        revision_count += 1;
+
+        let does_email_match = {
+            let commit_author = commit.author();
+            let commit_author_email = commit_author.email().unwrap_or("unknown");
+
+            emails.iter().any(|email| email == commit_author_email)
+        };
+
+        if !does_email_match {
+            continue;
+        }
+
+        found_commits.push(commit);
+    }
+
+    (revision_count, found_commits)
+}
+
 fn main() {
     let arguments = Arguments::parse();
 
@@ -82,6 +131,9 @@ fn main() {
     }
 
     for repo in get_repositories_in_dir(&input_dir) {
-        println!("{}", repo.head().unwrap().shorthand().unwrap())
+        let (revision_count, found_commits) = get_commits_by_email(&repo, &emails);
+
+        println!("revision count total: {revision_count}");
+        println!("revision count matched: {}", found_commits.len());
     }
 }
