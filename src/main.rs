@@ -1,6 +1,7 @@
-use clap::{Parser,ValueHint};
-use std::path::Path;
+use clap::{Parser, ValueHint};
+use git2::Repository;
 use regex::Regex;
+use std::path::Path;
 
 #[derive(Parser)]
 struct Arguments {
@@ -24,14 +25,53 @@ fn is_email_valid(email: &String) -> bool {
     }
 }
 
-fn main() {
-    let Arguments {in_dir, out_dir, emails} = Arguments::parse();
+fn get_repositories_in_dir(dir: &Path) -> Vec<Repository> {
+    let mut repositories = Vec::new();
 
-    if !Path::new(&in_dir).is_dir() {
+    // If we are inside a Git repository already, then return that.
+    if dir.join(".git").is_dir() {
+        match Repository::open(dir) {
+            Ok(repository) => repositories.push(repository),
+            Err(error) => println!("failed to open repository: {}", error),
+        }
+
+        return repositories;
+    }
+
+    for entry in dir.read_dir().expect("Failed to read input directory.") {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => panic!("Failed to process directory entry: {}", error),
+        };
+
+        let git_path = Path::join(&entry.path(), ".git");
+
+        // Ignore entries that do not contain a .git directory.
+        if !Path::new(&git_path).is_dir() {
+            continue;
+        }
+
+        match Repository::open(entry.path()) {
+            Ok(repository) => repositories.push(repository),
+            Err(error) => println!("failed to open repository: {}", error),
+        }
+    }
+
+    repositories
+}
+
+fn main() {
+    let arguments = Arguments::parse();
+
+    let emails = arguments.emails;
+    let input_dir = Path::new(&arguments.in_dir);
+    let output_dir = Path::new(&arguments.out_dir);
+
+    if !input_dir.is_dir() {
         panic!("Input directory is invalid.");
     }
 
-    if !Path::new(&out_dir).is_dir() {
+    if !output_dir.is_dir() {
         panic!("Output directory is invalid.");
     }
 
@@ -41,7 +81,7 @@ fn main() {
         }
     }
 
-    println!("Input directory: {}", in_dir);
-    println!("Output directory: {}", out_dir);
-    println!("Emails: {:?}", emails);
+    for repo in get_repositories_in_dir(&input_dir) {
+        println!("{}", repo.head().unwrap().shorthand().unwrap())
+    }
 }
