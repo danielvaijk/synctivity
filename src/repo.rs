@@ -1,26 +1,31 @@
 use crate::email::EmailAddress;
 use git2::{Commit, Repository};
+use std::io;
 use std::path::Path;
+use thiserror::Error;
 
-pub fn get_repositories_in_dir(dir: &Path) -> Vec<Repository> {
+#[derive(Error, Debug)]
+pub enum RepoError {
+    #[error("Git error: {0}")]
+    Git2(#[from] git2::Error),
+    #[error("IO error: {0}")]
+    FileSystem(#[from] io::Error),
+}
+
+pub fn get_repositories_in_dir(dir: &Path) -> Result<Vec<Repository>, RepoError> {
     let mut repositories = Vec::new();
 
     // If we are inside a Git repository already, then return that.
     if dir.join(".git").is_dir() {
-        match Repository::open(dir) {
-            Ok(repository) => repositories.push(repository),
-            Err(error) => println!("failed to open repository: {}", error),
-        }
-
-        return repositories;
+        repositories.push(Repository::open(dir)?);
     }
 
-    for entry in dir.read_dir().expect("Failed to read input directory.") {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) => panic!("Failed to process directory entry: {}", error),
-        };
+    if !repositories.is_empty() {
+        return Ok(repositories);
+    }
 
+    for entry in dir.read_dir()? {
+        let entry = entry?;
         let git_path = Path::join(&entry.path(), ".git");
 
         // Ignore entries that do not contain a .git directory.
@@ -28,44 +33,26 @@ pub fn get_repositories_in_dir(dir: &Path) -> Vec<Repository> {
             continue;
         }
 
-        match Repository::open(entry.path()) {
-            Ok(repository) => repositories.push(repository),
-            Err(error) => println!("failed to open repository: {}", error),
-        }
+        repositories.push(Repository::open(entry.path())?);
     }
 
-    repositories
+    Ok(repositories)
 }
 
 pub fn get_commits_by_email<'repo>(
     repository: &'repo Repository,
     emails: &[EmailAddress],
-) -> (u32, Vec<Commit<'repo>>) {
-    let mut walker = match repository.revwalk() {
-        Ok(value) => value,
-        Err(error) => panic!("failed to create revision walker: {}", error),
-    };
+) -> Result<(u32, Vec<Commit<'repo>>), RepoError> {
+    let mut revision_walker = repository.revwalk()?;
 
-    if let Err(error) = walker.push_head() {
-        panic!(
-            "failed to add HEAD commit to revision walker for traversal: {}",
-            error
-        );
-    }
+    revision_walker.push_head()?;
 
     let mut revision_count: u32 = 0;
     let mut found_commits = Vec::new();
 
-    for revision in walker {
-        let oid = match revision {
-            Ok(value) => value,
-            Err(error) => panic!("failed to get OID from revision: {}", error),
-        };
-
-        let commit = match repository.find_commit(oid) {
-            Ok(value) => value,
-            Err(error) => panic!("failed to find commit with OID {}: {}", oid, error),
-        };
+    for revision in revision_walker {
+        let oid = revision?;
+        let commit = repository.find_commit(oid)?;
 
         revision_count += 1;
 
@@ -85,5 +72,5 @@ pub fn get_commits_by_email<'repo>(
         found_commits.push(commit);
     }
 
-    (revision_count, found_commits)
+    Ok((revision_count, found_commits))
 }

@@ -1,14 +1,13 @@
 use regex::Regex;
-use std::error::Error;
-use std::fmt;
-use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 use std::string::String;
+use thiserror::Error;
 
 #[derive(Clone)]
 pub struct EmailAddress(pub String);
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
+#[error("'{0}' is not a valid email address.")]
 pub struct InvalidEmailAddressError(String);
 
 impl FromStr for EmailAddress {
@@ -24,11 +23,3 @@ impl FromStr for EmailAddress {
         }
     }
 }
-
-impl Display for InvalidEmailAddressError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        write!(formatter, "'{}' is not a valid email address.", self.0)
-    }
-}
-
-impl Error for InvalidEmailAddressError {}
