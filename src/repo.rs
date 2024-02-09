@@ -12,7 +12,7 @@ pub enum RepoError {
     FileSystem(#[from] io::Error),
 }
 
-pub fn get_repositories_in_dir(dir: &Path) -> Result<Vec<Repository>, RepoError> {
+pub fn read_all_in_dir(dir: &Path) -> Result<Vec<Repository>, RepoError> {
     let mut repositories = Vec::new();
 
     // If we are inside a Git repository already, then return that.
@@ -73,4 +73,12 @@ pub fn get_commits_by_email<'repo>(
     }
 
     Ok((revision_count, found_commits))
+}
+
+pub fn read_or_create(path: &Path) -> Result<Repository, RepoError> {
+    if let Ok(existing_repo) = Repository::open(path) {
+        return Ok(existing_repo);
+    };
+
+    Ok(Repository::init(path)?)
 }
