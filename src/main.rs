@@ -35,10 +35,19 @@ fn main() {
         panic!("Output directory is invalid.");
     }
 
-    for repo in repo::get_repositories_in_dir(&input_dir) {
-        let (revision_count, found_commits) = repo::get_commits_by_email(&repo, &emails);
+    let repos = match repo::get_repositories_in_dir(&input_dir) {
+        Ok(repos) => repos,
+        Err(error) => panic!("{}", error),
+    };
 
-        println!("revision count total: {revision_count}");
+    for repo in repos {
+        let commits = repo::get_commits_by_email(&repo, &emails);
+        let (revision_count, found_commits) = match commits {
+            Ok(result) => result,
+            Err(error) => panic!("{}", error),
+        };
+
+        println!("revision count total: {}", revision_count);
         println!("revision count matched: {}", found_commits.len());
     }
 }
