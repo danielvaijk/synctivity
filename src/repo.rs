@@ -1,4 +1,5 @@
 use crate::email::EmailAddress;
+use crate::SYNC_REPO_NAME;
 use git2::{Commit, Repository, RepositoryInitOptions};
 use std::io;
 use std::path::Path;
@@ -10,30 +11,39 @@ pub enum RepoError {
     Git2(#[from] git2::Error),
     #[error("IO error: {0}")]
     FileSystem(#[from] io::Error),
+    #[error("Validation error: {0}")]
+    Validation(String),
 }
 
 pub fn read_all_in_dir(dir: &Path) -> Result<Vec<Repository>, RepoError> {
     let mut repositories = Vec::new();
 
-    // If we are inside a Git repository already, then return that.
-    if dir.join(".git").is_dir() {
-        repositories.push(Repository::open(dir)?);
-    }
+    if is_dir_git_repo(&dir) {
+        let absolute_dir = dir.canonicalize()?;
+        let dir_name = absolute_dir.file_name().unwrap();
 
-    if !repositories.is_empty() {
-        return Ok(repositories);
+        return if dir_name == SYNC_REPO_NAME {
+            Err(RepoError::Validation(format!(
+                "Cannot read {SYNC_REPO_NAME} repository as input."
+            )))
+        } else {
+            repositories.push(Repository::open(dir)?);
+            Ok(repositories)
+        };
     }
 
     for entry in dir.read_dir()? {
         let entry = entry?;
-        let git_path = Path::join(&entry.path(), ".git");
+        let entry_path = entry.path();
+        let entry_name = entry.file_name();
 
-        // Ignore entries that do not contain a .git directory.
-        if !Path::new(&git_path).is_dir() {
+        if !is_dir_git_repo(&entry_path) {
+            continue;
+        } else if entry_name == SYNC_REPO_NAME {
             continue;
         }
 
-        repositories.push(Repository::open(entry.path())?);
+        repositories.push(Repository::open(&entry_path)?)
     }
 
     Ok(repositories)
@@ -84,4 +94,8 @@ pub fn read_or_create(path: &Path) -> Result<Repository, RepoError> {
     let options = options.initial_head("main");
 
     Ok(Repository::init_opts(path, &options)?)
+}
+
+fn is_dir_git_repo(dir: &Path) -> bool {
+    dir.join(".git").is_dir()
 }

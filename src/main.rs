@@ -1,6 +1,7 @@
 use clap::{Parser, ValueHint};
 use email::EmailAddress;
-use std::path::Path;
+use git2::{Commit, Signature};
+use std::path::PathBuf;
 
 mod email;
 mod repo;
@@ -8,24 +9,26 @@ mod repo;
 #[derive(Parser)]
 struct Arguments {
     /// A path containing the source repositories.
-    #[arg(short, long = "input-dir", default_value = ".", value_hint = ValueHint::DirPath)]
-    in_dir: String,
+    #[arg(short, long, default_value = ".", value_hint = ValueHint::DirPath)]
+    input_dir: PathBuf,
 
     /// A path to the output repository.
-    #[arg(short, long = "output-dir", default_value = ".", value_hint = ValueHint::DirPath)]
-    out_dir: String,
+    #[arg(short, long, default_value = ".", value_hint = ValueHint::DirPath)]
+    output_dir: PathBuf,
 
     /// Your commit signature email address(es).
     #[arg(short, long, required = true, value_delimiter = ',', value_hint = ValueHint::EmailAddress)]
     emails: Vec<EmailAddress>,
 }
 
-fn main() {
-    let arguments = Arguments::parse();
+const SYNC_REPO_NAME: &str = "synctivity";
 
-    let emails = arguments.emails;
-    let input_dir = Path::new(&arguments.in_dir);
-    let output_dir = Path::new(&arguments.out_dir);
+fn main() {
+    let Arguments {
+        emails,
+        input_dir,
+        output_dir,
+    } = Arguments::parse();
 
     if !input_dir.is_dir() {
         panic!("Input directory is invalid.");
@@ -35,10 +38,10 @@ fn main() {
         panic!("Output directory is invalid.");
     }
 
-    let sync_repo_path = output_dir.join("synctivity");
     let _sync_repo = match repo::read_or_create(&sync_repo_path) {
+    let sync_repo_path = output_dir.join(SYNC_REPO_NAME);
         Ok(sync_repo) => sync_repo,
-        Err(error) => panic!("Failed to create sync repository: {}", error),
+        Err(error) => panic!("Failed to create {} repository: {}", SYNC_REPO_NAME, error),
     };
 
     let repos = match repo::read_all_in_dir(&input_dir) {
