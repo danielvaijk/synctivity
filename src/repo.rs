@@ -1,5 +1,5 @@
 use crate::email::EmailAddress;
-use git2::{Commit, Repository};
+use git2::{Commit, Repository, RepositoryInitOptions};
 use std::io;
 use std::path::Path;
 use thiserror::Error;
@@ -80,5 +80,8 @@ pub fn read_or_create(path: &Path) -> Result<Repository, RepoError> {
         return Ok(existing_repo);
     };
 
-    Ok(Repository::init(path)?)
+    let mut options = RepositoryInitOptions::new();
+    let options = options.initial_head("main");
+
+    Ok(Repository::init_opts(path, &options)?)
 }
