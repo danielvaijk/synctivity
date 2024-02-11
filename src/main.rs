@@ -1,4 +1,4 @@
-use crate::repo::{Author, SyncRepo};
+use crate::repo::{Author, CopyRepo, SyncRepo};
 use clap::{Parser, ValueHint};
 use email::EmailAddress;
 use git2::Commit;
@@ -54,16 +54,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let author = Author::new(&author_name, &author_email);
 
     let sync_repo = output_dir.join(SYNC_REPO_NAME);
-    let sync_repo = repo::read_or_create_repo(&sync_repo)?;
-
-    if sync_repo.head().is_ok() {
-        return Err(
-            format!("Cannot handle existing {SYNC_REPO_NAME} repository history yet.",).into(),
-        );
-    }
-
+    let sync_repo = SyncRepo::read_or_create_repo_from_path(&sync_repo)?;
     let sync_repo = SyncRepo::new(&author, &sync_repo)?;
-    let repos_to_sync = match repo::read_all_in_dir(&input_dir)? {
+
+    let repos_to_copy = match CopyRepo::read_all_in_dir(&input_dir)? {
         Some(repos_to_sync) => repos_to_sync,
         None => return Err("No repositories found in the input directory".into()),
     };
@@ -72,9 +66,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     // so there isn't a parent commit ID to start from.
     let mut parents: Vec<Commit> = Vec::new();
 
-    for repo in repos_to_sync {
-        let author_commits = repo::get_author_commits(&repo, &match_emails);
-        let (revision_count, found_commits) = author_commits?;
+    for repo in repos_to_copy {
+        let author_commits = repo.get_author_commits(&match_emails);
+        let (total_count, found_commits) = author_commits?;
 
         if found_commits.is_empty() {
             println!("Found 0 commits by author.");
@@ -83,9 +77,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         match sync_repo.copy_over_commits(&mut parents, &found_commits) {
             Ok(_) => println!(
-                "Copied {} commit(s) out of {}.",
-                revision_count,
-                found_commits.len()
+                "Copied {} commit(s) out of {} in {}.",
+                found_commits.len(),
+                total_count,
+                repo.name(),
             ),
             Err(error) => return Err(Box::new(error)),
         }

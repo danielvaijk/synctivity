@@ -44,6 +44,23 @@ impl SyncRepo<'_> {
         Ok(SyncRepo { repo, tree, author })
     }
 
+    pub fn read_or_create_repo_from_path(path: &Path) -> Result<Repository, RepoError> {
+        if let Ok(repo) = Repository::open(path) {
+            return if repo.head().is_ok() {
+                Err(RepoError::Validation(format!(
+                    "Cannot handle existing {SYNC_REPO_NAME} repository history yet.",
+                )))
+            } else {
+                Ok(repo)
+            };
+        };
+
+        let mut options = RepositoryInitOptions::new();
+        let options = options.initial_head("main");
+
+        Ok(Repository::init_opts(path, &options)?)
+    }
+
     pub fn copy_over_commits<'repo>(
         &'repo self,
         parents: &mut Vec<Commit<'repo>>,
@@ -79,92 +96,103 @@ impl SyncRepo<'_> {
     }
 }
 
-pub fn read_all_in_dir(dir: &Path) -> Result<Option<Vec<Repository>>, RepoError> {
-    let mut repositories = Vec::new();
+pub struct CopyRepo {
+    repo: Repository,
+    name: String,
+}
 
-    if is_dir_git_repo(&dir) {
-        let dir_absolute = dir.canonicalize()?;
-        let dir_name = dir_absolute.file_name().unwrap();
+impl CopyRepo {
+    pub fn read_all_in_dir(dir: &Path) -> Result<Option<Vec<Self>>, RepoError> {
+        let mut repositories = Vec::new();
 
-        return if dir_name == SYNC_REPO_NAME {
-            Err(RepoError::Validation(format!(
-                "Cannot read {SYNC_REPO_NAME} repository as input."
-            )))
+        if Self::is_dir_git_repo(&dir) {
+            let dir_absolute = dir.canonicalize()?;
+            let dir_name = dir_absolute.file_name().unwrap();
+
+            return if dir_name == SYNC_REPO_NAME {
+                Err(RepoError::Validation(format!(
+                    "Cannot read {SYNC_REPO_NAME} repository as input."
+                )))
+            } else {
+                repositories.push(Self::from(
+                    Repository::open(dir)?,
+                    String::from(dir_name.to_str().unwrap()),
+                ));
+
+                Ok(Some(repositories))
+            };
+        }
+
+        for entry in dir.read_dir()? {
+            let entry = entry?;
+            let entry_path = entry.path();
+            let entry_name = entry.file_name();
+
+            if !Self::is_dir_git_repo(&entry_path) {
+                continue;
+            } else if entry_name == SYNC_REPO_NAME {
+                continue;
+            }
+
+            repositories.push(Self::from(
+                Repository::open(entry_path)?,
+                entry_name.into_string().unwrap(),
+            ));
+        }
+
+        if repositories.is_empty() {
+            Ok(None)
         } else {
-            repositories.push(Repository::open(dir)?);
             Ok(Some(repositories))
-        };
+        }
     }
 
-    for entry in dir.read_dir()? {
-        let entry = entry?;
-        let entry_path = entry.path();
-        let entry_name = entry.file_name();
+    pub fn get_author_commits(
+        &self,
+        emails: &[EmailAddress],
+    ) -> Result<(u32, Vec<Commit>), RepoError> {
+        let mut revision_walker = self.repo.revwalk()?;
 
-        if !is_dir_git_repo(&entry_path) {
-            continue;
-        } else if entry_name == SYNC_REPO_NAME {
-            continue;
+        revision_walker.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
+        revision_walker.push_head()?;
+
+        let mut total_count: u32 = 0;
+        let mut found_commits = Vec::new();
+
+        for revision in revision_walker {
+            let oid = revision?;
+            let commit = self.repo.find_commit(oid)?;
+
+            total_count += 1;
+
+            let does_email_match = {
+                let commit_author = commit.author();
+                let commit_author_email = commit_author.email().unwrap_or("unknown");
+
+                emails
+                    .iter()
+                    .any(|EmailAddress(email)| email == commit_author_email)
+            };
+
+            if !does_email_match {
+                continue;
+            }
+
+            found_commits.push(commit);
         }
 
-        repositories.push(Repository::open(&entry_path)?)
+        Ok((total_count, found_commits))
     }
 
-    if repositories.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(repositories))
-    }
-}
-
-pub fn get_author_commits<'repo>(
-    repository: &'repo Repository,
-    emails: &[EmailAddress],
-) -> Result<(u32, Vec<Commit<'repo>>), RepoError> {
-    let mut revision_walker = repository.revwalk()?;
-
-    revision_walker.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
-    revision_walker.push_head()?;
-
-    let mut revision_count: u32 = 0;
-    let mut found_commits = Vec::new();
-
-    for revision in revision_walker {
-        let oid = revision?;
-        let commit = repository.find_commit(oid)?;
-
-        revision_count += 1;
-
-        let does_email_match = {
-            let commit_author = commit.author();
-            let commit_author_email = commit_author.email().unwrap_or("unknown");
-
-            emails
-                .iter()
-                .any(|EmailAddress(email)| email == commit_author_email)
-        };
-
-        if !does_email_match {
-            continue;
-        }
-
-        found_commits.push(commit);
+    pub fn name(&self) -> &String {
+        &self.name
     }
 
-    Ok((revision_count, found_commits))
-}
+    fn is_dir_git_repo(dir: &Path) -> bool {
+        dir.join(".git").is_dir()
+    }
 
-pub fn read_or_create_repo(path: &Path) -> Result<Repository, RepoError> {
-    if let Ok(existing_repo) = Repository::open(path) {
-        return Ok(existing_repo);
-    };
-
-    let mut options = RepositoryInitOptions::new();
-    let options = options.initial_head("main");
-
-    Ok(Repository::init_opts(path, &options)?)
-}
-
-fn is_dir_git_repo(dir: &Path) -> bool {
-    dir.join(".git").is_dir()
+    fn from(repo: Repository, name: String) -> CopyRepo {
+        CopyRepo { repo, name }
+    }
 }
