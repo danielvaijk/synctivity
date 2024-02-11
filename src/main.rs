@@ -1,6 +1,6 @@
 use clap::{Parser, ValueHint};
 use email::EmailAddress;
-use git2::{Commit, Signature};
+use git2::Commit;
 use std::path::PathBuf;
 
 mod email;
@@ -60,14 +60,34 @@ fn main() {
         panic!("Could not find any repositories in the input directory.");
     }
 
+    let mut parents: Vec<Commit> = Vec::new();
+
+    // Since the commits never contain any changes, we always (re)use an empty
+    // tree object. There's no file/directory information to include.
+    let tree = match repo::create_empty_tree(&sync_repo) {
+        Ok(tree) => tree,
+        Err(error) => panic!("Failed to create tree object for sync: {}", error),
+    };
+
     for repo in repos {
-        let commits = repo::get_commits_by_email(&repo, &emails);
-        let (revision_count, found_commits) = match commits {
+        let (revision_count, found_commits) = match repo::get_all_commits_by_emails(&repo, &emails)
+        {
             Ok(result) => result,
             Err(error) => panic!("Failed to read commits from repository: {}", error),
         };
 
-        println!("revision count total: {}", revision_count);
-        println!("revision count matched: {}", found_commits.len());
+        if let Err(error) = repo::copy_over_commits(&sync_repo, &mut parents, &tree, &found_commits)
+        {
+            panic!(
+                "Failed to copy commits to {} repository: {}",
+                SYNC_REPO_NAME, error
+            )
+        }
+
+        println!(
+            "Copied {} commit(s) out of {}.",
+            revision_count,
+            found_commits.len()
+        );
     }
 }
