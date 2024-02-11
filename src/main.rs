@@ -51,13 +51,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let EmailAddress(author_email) = author_email;
-    let author = Author::new(&author_name, &author_email);
+    let author = Author::new(&author_name, &author_email, &match_emails);
 
     let sync_repo = output_dir.join(SYNC_REPO_NAME);
     let sync_repo = SyncRepo::read_or_create_repo_from_path(&sync_repo)?;
-    let sync_repo = SyncRepo::new(&author, &sync_repo)?;
+    let sync_repo = SyncRepo::from(&sync_repo, &author)?;
 
-    let repos_to_copy = match CopyRepo::read_all_in_dir(&input_dir)? {
+    let repos_to_copy = match CopyRepo::read_all_in_dir(&input_dir, &author)? {
         Some(repos_to_sync) => repos_to_sync,
         None => return Err("No repositories found in the input directory".into()),
     };
@@ -67,7 +67,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut parents: Vec<Commit> = Vec::new();
 
     for repo in repos_to_copy {
-        let author_commits = repo.get_author_commits(&match_emails);
+        let author_commits = repo.get_author_commits();
         let (total_count, found_commits) = author_commits?;
 
         if found_commits.is_empty() {
