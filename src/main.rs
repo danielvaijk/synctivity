@@ -38,11 +38,18 @@ fn main() {
         panic!("Output directory is invalid.");
     }
 
-    let _sync_repo = match repo::read_or_create(&sync_repo_path) {
     let sync_repo_path = output_dir.join(SYNC_REPO_NAME);
+    let sync_repo = match repo::read_or_create(&sync_repo_path) {
         Ok(sync_repo) => sync_repo,
         Err(error) => panic!("Failed to create {} repository: {}", SYNC_REPO_NAME, error),
     };
+
+    if sync_repo.head().is_ok() {
+        panic!(
+            "Cannot handle existing {} repository history yet.",
+            SYNC_REPO_NAME
+        );
+    }
 
     let repos = match repo::read_all_in_dir(&input_dir) {
         Ok(repos) => repos,
