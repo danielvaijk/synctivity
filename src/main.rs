@@ -1,6 +1,8 @@
+use crate::repo::{Author, SyncRepo};
 use clap::{Parser, ValueHint};
 use email::EmailAddress;
 use git2::Commit;
+use std::error::Error;
 use std::path::PathBuf;
 
 mod email;
@@ -16,78 +18,78 @@ struct Arguments {
     #[arg(short, long, default_value = ".", value_hint = ValueHint::DirPath)]
     output_dir: PathBuf,
 
-    /// Your commit signature email address(es).
+    /// The name to sign the sync commits with.
+    #[arg(short = 'n', long, required = true, value_delimiter = ',', value_hint = ValueHint::Other)]
+    author_name: String,
+
+    /// The email address to sign the sync commits with.
+    #[arg(short = 'e', long, required = true, value_delimiter = ',', value_hint = ValueHint::EmailAddress)]
+    author_email: EmailAddress,
+
+    /// The commit signature email address(es) to match commits for.
     #[arg(short, long, required = true, value_delimiter = ',', value_hint = ValueHint::EmailAddress)]
-    emails: Vec<EmailAddress>,
+    match_emails: Vec<EmailAddress>,
 }
 
 const SYNC_REPO_NAME: &str = "synctivity";
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let Arguments {
-        emails,
         input_dir,
         output_dir,
+        author_name,
+        author_email,
+        match_emails,
     } = Arguments::parse();
 
     if !input_dir.is_dir() {
-        panic!("Input directory is invalid.");
+        return Err("Input directory is invalid".into());
     }
 
     if !output_dir.is_dir() {
-        panic!("Output directory is invalid.");
+        return Err("Output directory is invalid".into());
     }
 
-    let sync_repo_path = output_dir.join(SYNC_REPO_NAME);
-    let sync_repo = match repo::read_or_create(&sync_repo_path) {
-        Ok(sync_repo) => sync_repo,
-        Err(error) => panic!("Failed to create {} repository: {}", SYNC_REPO_NAME, error),
-    };
+    let EmailAddress(author_email) = author_email;
+    let author = Author::new(&author_name, &author_email);
+
+    let sync_repo = output_dir.join(SYNC_REPO_NAME);
+    let sync_repo = repo::read_or_create_repo(&sync_repo)?;
 
     if sync_repo.head().is_ok() {
-        panic!(
-            "Cannot handle existing {} repository history yet.",
-            SYNC_REPO_NAME
+        return Err(
+            format!("Cannot handle existing {SYNC_REPO_NAME} repository history yet.",).into(),
         );
     }
 
-    let repos = match repo::read_all_in_dir(&input_dir) {
-        Ok(repos) => repos,
-        Err(error) => panic!("Failed to read input repositories: {}", error),
+    let sync_repo = SyncRepo::new(&author, &sync_repo)?;
+    let repos_to_sync = match repo::read_all_in_dir(&input_dir)? {
+        Some(repos_to_sync) => repos_to_sync,
+        None => return Err("No repositories found in the input directory".into()),
     };
 
-    if repos.is_empty() {
-        panic!("Could not find any repositories in the input directory.");
-    }
-
+    // We always start from scratch since we don't handle history delta's yet,
+    // so there isn't a parent commit ID to start from.
     let mut parents: Vec<Commit> = Vec::new();
 
-    // Since the commits never contain any changes, we always (re)use an empty
-    // tree object. There's no file/directory information to include.
-    let tree = match repo::create_empty_tree(&sync_repo) {
-        Ok(tree) => tree,
-        Err(error) => panic!("Failed to create tree object for sync: {}", error),
-    };
+    for repo in repos_to_sync {
+        let author_commits = repo::get_author_commits(&repo, &match_emails);
+        let (revision_count, found_commits) = author_commits?;
 
-    for repo in repos {
-        let (revision_count, found_commits) = match repo::get_all_commits_by_emails(&repo, &emails)
-        {
-            Ok(result) => result,
-            Err(error) => panic!("Failed to read commits from repository: {}", error),
-        };
-
-        if let Err(error) = repo::copy_over_commits(&sync_repo, &mut parents, &tree, &found_commits)
-        {
-            panic!(
-                "Failed to copy commits to {} repository: {}",
-                SYNC_REPO_NAME, error
-            )
+        if found_commits.is_empty() {
+            println!("Found 0 commits by author.");
+            continue;
         }
 
-        println!(
-            "Copied {} commit(s) out of {}.",
-            revision_count,
-            found_commits.len()
-        );
+        match sync_repo.copy_over_commits(&mut parents, &found_commits) {
+            Ok(_) => println!(
+                "Copied {} commit(s) out of {}.",
+                revision_count,
+                found_commits.len()
+            ),
+            Err(error) => return Err(Box::new(error)),
+        }
     }
+
+    Ok(())
 }
