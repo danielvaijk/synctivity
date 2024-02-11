@@ -18,11 +18,20 @@ pub enum RepoError {
 pub struct Author<'repo> {
     name: &'repo str,
     email: &'repo str,
+    email_aliases: &'repo Vec<EmailAddress>,
 }
 
 impl Author<'_> {
-    pub fn new<'repo>(name: &'repo str, email: &'repo str) -> Author<'repo> {
-        Author { name, email }
+    pub fn new<'repo>(
+        name: &'repo str,
+        email: &'repo str,
+        email_aliases: &'repo Vec<EmailAddress>,
+    ) -> Author<'repo> {
+        Author {
+            name,
+            email,
+            email_aliases,
+        }
     }
 }
 
@@ -33,9 +42,9 @@ pub struct SyncRepo<'repo> {
 }
 
 impl SyncRepo<'_> {
-    pub fn new<'repo>(
-        author: &'repo Author,
+    pub fn from<'repo>(
         repo: &'repo Repository,
+        author: &'repo Author,
     ) -> Result<SyncRepo<'repo>, RepoError> {
         // Since the commits never contain any changes, we always (re)use an empty
         // tree object. There's no file/directory information to include.
@@ -96,13 +105,17 @@ impl SyncRepo<'_> {
     }
 }
 
-pub struct CopyRepo {
+pub struct CopyRepo<'repo> {
     repo: Repository,
     name: String,
+    author: &'repo Author<'repo>,
 }
 
-impl CopyRepo {
-    pub fn read_all_in_dir(dir: &Path) -> Result<Option<Vec<Self>>, RepoError> {
+impl CopyRepo<'_> {
+    pub fn read_all_in_dir<'repo>(
+        dir: &'repo Path,
+        author: &'repo Author,
+    ) -> Result<Option<Vec<CopyRepo<'repo>>>, RepoError> {
         let mut repositories = Vec::new();
 
         if Self::is_dir_git_repo(&dir) {
@@ -117,6 +130,7 @@ impl CopyRepo {
                 repositories.push(Self::from(
                     Repository::open(dir)?,
                     String::from(dir_name.to_str().unwrap()),
+                    author,
                 ));
 
                 Ok(Some(repositories))
@@ -137,6 +151,7 @@ impl CopyRepo {
             repositories.push(Self::from(
                 Repository::open(entry_path)?,
                 entry_name.into_string().unwrap(),
+                author,
             ));
         }
 
@@ -147,10 +162,7 @@ impl CopyRepo {
         }
     }
 
-    pub fn get_author_commits(
-        &self,
-        emails: &[EmailAddress],
-    ) -> Result<(u32, Vec<Commit>), RepoError> {
+    pub fn get_author_commits(&self) -> Result<(u32, Vec<Commit>), RepoError> {
         let mut revision_walker = self.repo.revwalk()?;
 
         revision_walker.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
@@ -169,7 +181,8 @@ impl CopyRepo {
                 let commit_author = commit.author();
                 let commit_author_email = commit_author.email().unwrap_or("unknown");
 
-                emails
+                self.author
+                    .email_aliases
                     .iter()
                     .any(|EmailAddress(email)| email == commit_author_email)
             };
@@ -192,7 +205,7 @@ impl CopyRepo {
         dir.join(".git").is_dir()
     }
 
-    fn from(repo: Repository, name: String) -> CopyRepo {
-        CopyRepo { repo, name }
+    fn from<'repo>(repo: Repository, name: String, author: &'repo Author) -> CopyRepo<'repo> {
+        CopyRepo { repo, name, author }
     }
 }
