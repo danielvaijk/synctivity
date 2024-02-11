@@ -1,6 +1,6 @@
 use crate::email::EmailAddress;
 use crate::SYNC_REPO_NAME;
-use git2::{Commit, Repository, RepositoryInitOptions, Sort, Tree};
+use git2::{Commit, Repository, RepositoryInitOptions, Signature, Sort, Tree};
 use std::io;
 use std::path::Path;
 use thiserror::Error;
@@ -15,7 +15,71 @@ pub enum RepoError {
     Validation(String),
 }
 
-pub fn read_all_in_dir(dir: &Path) -> Result<Vec<Repository>, RepoError> {
+pub struct Author<'repo> {
+    name: &'repo str,
+    email: &'repo str,
+}
+
+impl Author<'_> {
+    pub fn new<'repo>(name: &'repo str, email: &'repo str) -> Author<'repo> {
+        Author { name, email }
+    }
+}
+
+pub struct SyncRepo<'repo> {
+    repo: &'repo Repository,
+    author: &'repo Author<'repo>,
+    tree: Tree<'repo>,
+}
+
+impl SyncRepo<'_> {
+    pub fn new<'repo>(
+        author: &'repo Author,
+        repo: &'repo Repository,
+    ) -> Result<SyncRepo<'repo>, RepoError> {
+        // Since the commits never contain any changes, we always (re)use an empty
+        // tree object. There's no file/directory information to include.
+        let tree = Self::create_empty_tree(&repo)?;
+
+        Ok(SyncRepo { repo, tree, author })
+    }
+
+    pub fn copy_over_commits<'repo>(
+        &'repo self,
+        parents: &mut Vec<Commit<'repo>>,
+        commits: &Vec<Commit>,
+    ) -> Result<(), RepoError> {
+        let SyncRepo { author, repo, tree } = self;
+
+        for commit in commits {
+            let parents_ref: Vec<&Commit> = parents.iter().collect();
+            let signature = Signature::new(&author.name, &author.email, &commit.author().when())?;
+
+            let commit_id = repo.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                commit.message().unwrap(),
+                &tree,
+                &parents_ref,
+            )?;
+
+            parents.clear();
+            parents.push(repo.find_commit(commit_id)?);
+        }
+
+        Ok(())
+    }
+
+    fn create_empty_tree(repo: &Repository) -> Result<Tree, RepoError> {
+        let tree = repo.treebuilder(None)?.write()?;
+        let tree = repo.find_tree(tree)?;
+
+        Ok(tree)
+    }
+}
+
+pub fn read_all_in_dir(dir: &Path) -> Result<Option<Vec<Repository>>, RepoError> {
     let mut repositories = Vec::new();
 
     if is_dir_git_repo(&dir) {
@@ -28,7 +92,7 @@ pub fn read_all_in_dir(dir: &Path) -> Result<Vec<Repository>, RepoError> {
             )))
         } else {
             repositories.push(Repository::open(dir)?);
-            Ok(repositories)
+            Ok(Some(repositories))
         };
     }
 
@@ -46,10 +110,14 @@ pub fn read_all_in_dir(dir: &Path) -> Result<Vec<Repository>, RepoError> {
         repositories.push(Repository::open(&entry_path)?)
     }
 
-    Ok(repositories)
+    if repositories.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(repositories))
+    }
 }
 
-pub fn get_all_commits_by_emails<'repo>(
+pub fn get_author_commits<'repo>(
     repository: &'repo Repository,
     emails: &[EmailAddress],
 ) -> Result<(u32, Vec<Commit<'repo>>), RepoError> {
@@ -86,7 +154,7 @@ pub fn get_all_commits_by_emails<'repo>(
     Ok((revision_count, found_commits))
 }
 
-pub fn read_or_create(path: &Path) -> Result<Repository, RepoError> {
+pub fn read_or_create_repo(path: &Path) -> Result<Repository, RepoError> {
     if let Ok(existing_repo) = Repository::open(path) {
         return Ok(existing_repo);
     };
@@ -95,41 +163,6 @@ pub fn read_or_create(path: &Path) -> Result<Repository, RepoError> {
     let options = options.initial_head("main");
 
     Ok(Repository::init_opts(path, &options)?)
-}
-
-pub fn create_empty_tree(repo: &Repository) -> Result<Tree, RepoError> {
-    let tree = repo.treebuilder(None)?.write()?;
-    let tree = repo.find_tree(tree)?;
-
-    Ok(tree)
-}
-
-pub fn copy_over_commits<'repo>(
-    repo: &'repo Repository,
-    parents: &mut Vec<Commit<'repo>>,
-    tree: &Tree,
-    commits: &Vec<Commit>,
-) -> Result<(), RepoError> {
-    for commit in commits {
-        let parents_ref: Vec<&Commit> = parents.iter().collect();
-
-        let message = commit.message().unwrap();
-        let signature = commit.author();
-
-        let commit_id = repo.commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            message,
-            &tree,
-            &parents_ref,
-        )?;
-
-        parents.clear();
-        parents.push(repo.find_commit(commit_id)?);
-    }
-
-    Ok(())
 }
 
 fn is_dir_git_repo(dir: &Path) -> bool {
