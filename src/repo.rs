@@ -39,6 +39,7 @@ pub struct SyncRepo<'repo> {
     repo: &'repo Repository,
     author: &'repo Author<'repo>,
     tree: Tree<'repo>,
+    parents: Vec<Commit<'repo>>,
 }
 
 impl SyncRepo<'_> {
@@ -50,7 +51,16 @@ impl SyncRepo<'_> {
         // tree object. There's no file/directory information to include.
         let tree = Self::create_empty_tree(&repo)?;
 
-        Ok(SyncRepo { repo, tree, author })
+        // We always start from scratch since we don't handle history delta's yet,
+        // so there isn't a parent commit ID to start from.
+        let parents: Vec<Commit> = Vec::new();
+
+        Ok(SyncRepo {
+            repo,
+            tree,
+            author,
+            parents,
+        })
     }
 
     pub fn read_or_create_repo_from_path(path: &Path) -> Result<Repository, RepoError> {
@@ -70,29 +80,28 @@ impl SyncRepo<'_> {
         Ok(Repository::init_opts(path, &options)?)
     }
 
-    pub fn copy_over_commits<'repo>(
-        &'repo self,
-        parents: &mut Vec<Commit<'repo>>,
-        commits: &Vec<Commit>,
-    ) -> Result<(), RepoError> {
-        let SyncRepo { author, repo, tree } = self;
+    pub fn copy_commit(&mut self, commit: &Commit) -> Result<(), RepoError> {
+        let SyncRepo {
+            author,
+            repo,
+            tree,
+            ref mut parents,
+        } = self;
 
-        for commit in commits {
-            let parents_ref: Vec<&Commit> = parents.iter().collect();
-            let signature = Signature::new(&author.name, &author.email, &commit.author().when())?;
+        let parents_ref: Vec<&Commit> = parents.iter().collect();
+        let signature = Signature::new(&author.name, &author.email, &commit.author().when())?;
 
-            let commit_id = repo.commit(
-                Some("HEAD"),
-                &signature,
-                &signature,
-                commit.message().unwrap(),
-                &tree,
-                &parents_ref,
-            )?;
+        let commit_id = repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            commit.message().unwrap(),
+            &tree,
+            &parents_ref,
+        )?;
 
-            parents.clear();
-            parents.push(repo.find_commit(commit_id)?);
-        }
+        parents.clear();
+        parents.push(repo.find_commit(commit_id)?);
 
         Ok(())
     }
@@ -162,20 +171,17 @@ impl CopyRepo<'_> {
         }
     }
 
-    pub fn get_author_commits(&self) -> Result<(u32, Vec<Commit>), RepoError> {
+    pub fn get_author_commits(&self) -> Result<Vec<Commit>, RepoError> {
         let mut revision_walker = self.repo.revwalk()?;
 
         revision_walker.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
         revision_walker.push_head()?;
 
-        let mut total_count: u32 = 0;
-        let mut found_commits = Vec::new();
+        let mut commits = Vec::new();
 
         for revision in revision_walker {
             let oid = revision?;
             let commit = self.repo.find_commit(oid)?;
-
-            total_count += 1;
 
             let does_email_match = {
                 let commit_author = commit.author();
@@ -191,10 +197,10 @@ impl CopyRepo<'_> {
                 continue;
             }
 
-            found_commits.push(commit);
+            commits.push(commit);
         }
 
-        Ok((total_count, found_commits))
+        Ok(commits)
     }
 
     pub fn name(&self) -> &String {
