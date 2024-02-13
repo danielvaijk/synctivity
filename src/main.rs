@@ -1,7 +1,6 @@
 use crate::repo::{Author, CopyRepo, SyncRepo};
 use clap::{Parser, ValueHint};
 use email::EmailAddress;
-use git2::Commit;
 use std::error::Error;
 use std::path::PathBuf;
 
@@ -55,34 +54,32 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let sync_repo = output_dir.join(SYNC_REPO_NAME);
     let sync_repo = SyncRepo::read_or_create_repo_from_path(&sync_repo)?;
-    let sync_repo = SyncRepo::from(&sync_repo, &author)?;
 
     let repos_to_copy = match CopyRepo::read_all_in_dir(&input_dir, &author)? {
         Some(repos_to_sync) => repos_to_sync,
         None => return Err("No repositories found in the input directory".into()),
     };
 
-    // We always start from scratch since we don't handle history delta's yet,
-    // so there isn't a parent commit ID to start from.
-    let mut parents: Vec<Commit> = Vec::new();
+    let mut sync_repo = SyncRepo::from(&sync_repo, &author)?;
+    let mut commit_iters = Vec::with_capacity(repos_to_copy.len());
 
-    for repo in repos_to_copy {
-        let author_commits = repo.get_author_commits();
-        let (total_count, found_commits) = author_commits?;
+    for repo in repos_to_copy.iter() {
+        let commits = repo.get_author_commits()?;
+        let result = (repo.name(), commits.len(), commits.into_iter());
 
-        if found_commits.is_empty() {
-            println!("Found 0 commits by author.");
-            continue;
-        }
+        commit_iters.push(result)
+    }
 
-        match sync_repo.copy_over_commits(&mut parents, &found_commits) {
-            Ok(_) => println!(
-                "Copied {} commit(s) out of {} in {}.",
-                found_commits.len(),
-                total_count,
-                repo.name(),
-            ),
-            Err(error) => return Err(Box::new(error)),
+    while commit_iters.iter().any(|(.., iter)| iter.len() > 0) {
+        for item in commit_iters.iter_mut() {
+            let (repo_name, commit_count, commit_iter) = item;
+            let commit = commit_iter.next().unwrap();
+
+            sync_repo.copy_commit(&commit)?;
+
+            if commit_iter.len() == 0 {
+                println!("Synced {} commit(s) from {}.", commit_count, repo_name);
+            }
         }
     }
 
