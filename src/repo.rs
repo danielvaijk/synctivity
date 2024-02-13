@@ -17,21 +17,25 @@ pub enum RepoError {
 
 pub struct Author<'repo> {
     name: &'repo str,
-    email: &'repo str,
-    email_aliases: &'repo Vec<EmailAddress>,
+    emails: &'repo Vec<EmailAddress>,
 }
 
 impl Author<'_> {
     pub fn new<'repo>(
         name: &'repo str,
-        email: &'repo str,
-        email_aliases: &'repo Vec<EmailAddress>,
-    ) -> Author<'repo> {
-        Author {
-            name,
-            email,
-            email_aliases,
+        emails: &'repo Vec<EmailAddress>,
+    ) -> Result<Author<'repo>, RepoError> {
+        if emails.len() > 0 {
+            Ok(Author { name, emails })
+        } else {
+            Err(RepoError::Validation(
+                "An author requires at least one email address.".into(),
+            ))
         }
+    }
+
+    pub fn signature_email(&self) -> &EmailAddress {
+        &self.emails.get(0).unwrap()
     }
 }
 
@@ -43,7 +47,7 @@ pub struct SyncRepo<'repo> {
 }
 
 impl SyncRepo<'_> {
-    pub fn from<'repo>(
+    pub fn new<'repo>(
         repo: &'repo Repository,
         author: &'repo Author,
     ) -> Result<SyncRepo<'repo>, RepoError> {
@@ -80,7 +84,33 @@ impl SyncRepo<'_> {
         Ok(Repository::init_opts(path, &options)?)
     }
 
-    pub fn copy_commit(&mut self, commit: &Commit) -> Result<(), RepoError> {
+    pub fn copy_author_commits(&mut self, repos_to_copy: Vec<CopyRepo>) -> Result<(), RepoError> {
+        let mut commit_iters = Vec::with_capacity(repos_to_copy.len());
+
+        for repo in repos_to_copy.iter() {
+            let commits = repo.get_author_commits()?;
+            let result = (repo.name(), commits.len(), commits.into_iter());
+
+            commit_iters.push(result)
+        }
+
+        while commit_iters.iter().any(|(.., iter)| iter.len() > 0) {
+            for item in commit_iters.iter_mut() {
+                let (repo_name, commit_count, commit_iter) = item;
+                let commit = commit_iter.next().unwrap();
+
+                self.copy_commit(&commit)?;
+
+                if commit_iter.len() == 0 {
+                    println!("Synced {} commit(s) from {}.", commit_count, repo_name);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn copy_commit(&mut self, commit: &Commit) -> Result<(), RepoError> {
         let SyncRepo {
             author,
             repo,
@@ -89,7 +119,8 @@ impl SyncRepo<'_> {
         } = self;
 
         let parents_ref: Vec<&Commit> = parents.iter().collect();
-        let signature = Signature::new(&author.name, &author.email, &commit.author().when())?;
+        let EmailAddress(email) = author.signature_email();
+        let signature = Signature::new(&author.name, email.as_str(), &commit.author().when())?;
 
         let commit_id = repo.commit(
             Some("HEAD"),
@@ -121,10 +152,10 @@ pub struct CopyRepo<'repo> {
 }
 
 impl CopyRepo<'_> {
-    pub fn read_all_in_dir<'repo>(
+    pub fn new_from_all_in_dir<'repo>(
         dir: &'repo Path,
         author: &'repo Author,
-    ) -> Result<Option<Vec<CopyRepo<'repo>>>, RepoError> {
+    ) -> Result<Vec<CopyRepo<'repo>>, RepoError> {
         let mut repositories = Vec::new();
 
         if Self::is_dir_git_repo(&dir) {
@@ -142,7 +173,7 @@ impl CopyRepo<'_> {
                     author,
                 ));
 
-                Ok(Some(repositories))
+                Ok(repositories)
             };
         }
 
@@ -165,10 +196,16 @@ impl CopyRepo<'_> {
         }
 
         if repositories.is_empty() {
-            Ok(None)
+            Err(RepoError::Validation(
+                "No repositories found in the input directory".into(),
+            ))
         } else {
-            Ok(Some(repositories))
+            Ok(repositories)
         }
+    }
+
+    pub fn name(&self) -> &String {
+        &self.name
     }
 
     pub fn get_author_commits(&self) -> Result<Vec<Commit>, RepoError> {
@@ -177,7 +214,7 @@ impl CopyRepo<'_> {
         revision_walker.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
         revision_walker.push_head()?;
 
-        let mut commits = Vec::new();
+        let mut author_commits = Vec::new();
 
         for revision in revision_walker {
             let oid = revision?;
@@ -188,7 +225,7 @@ impl CopyRepo<'_> {
                 let commit_author_email = commit_author.email().unwrap_or("unknown");
 
                 self.author
-                    .email_aliases
+                    .emails
                     .iter()
                     .any(|EmailAddress(email)| email == commit_author_email)
             };
@@ -197,14 +234,10 @@ impl CopyRepo<'_> {
                 continue;
             }
 
-            commits.push(commit);
+            author_commits.push(commit);
         }
 
-        Ok(commits)
-    }
-
-    pub fn name(&self) -> &String {
-        &self.name
+        Ok(author_commits)
     }
 
     fn is_dir_git_repo(dir: &Path) -> bool {
