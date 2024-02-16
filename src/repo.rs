@@ -1,6 +1,6 @@
 use crate::email::EmailAddress;
 use crate::SYNC_REPO_NAME;
-use git2::{Commit, Repository, RepositoryInitOptions, Signature, Sort, Tree};
+use git2::{Commit, Oid, Repository, RepositoryInitOptions, Signature, Sort, Tree};
 use std::io;
 use std::path::Path;
 use thiserror::Error;
@@ -40,51 +40,53 @@ impl Author<'_> {
 }
 
 pub struct SyncRepo<'repo> {
-    repo: &'repo Repository,
+    repo: Repository,
     author: &'repo Author<'repo>,
-    tree: Tree<'repo>,
-    parents: Vec<Commit<'repo>>,
+    parents: Vec<Oid>,
 }
 
 impl SyncRepo<'_> {
-    pub fn new<'repo>(
-        repo: &'repo Repository,
+    pub fn read_or_create<'repo>(
+        path: &'repo Path,
         author: &'repo Author,
     ) -> Result<SyncRepo<'repo>, RepoError> {
-        // Since the commits never contain any changes, we always (re)use an empty
-        // tree object. There's no file/directory information to include.
-        let tree = Self::create_empty_tree(&repo)?;
+        let mut repo: Option<Repository> = None;
+        let repo_path = path.join(SYNC_REPO_NAME);
+
+        if let Ok(existing_repo) = Repository::open(&repo_path) {
+            if existing_repo.head().is_ok() {
+                return Err(RepoError::Validation(format!(
+                    "Cannot handle existing {SYNC_REPO_NAME} repository history yet.",
+                )));
+            } else {
+                repo = Some(existing_repo);
+            };
+        };
+
+        if repo.is_none() {
+            let mut options = RepositoryInitOptions::new();
+            let options = options.initial_head("main");
+
+            repo = Some(Repository::init_opts(&repo_path, &options)?);
+        }
+
+        let repo = repo.unwrap();
 
         // We always start from scratch since we don't handle history delta's yet,
         // so there isn't a parent commit ID to start from.
-        let parents: Vec<Commit> = Vec::new();
+        let parents: Vec<Oid> = Vec::new();
 
         Ok(SyncRepo {
             repo,
-            tree,
             author,
             parents,
         })
     }
 
-    pub fn read_or_create_repo_from_path(path: &Path) -> Result<Repository, RepoError> {
-        if let Ok(repo) = Repository::open(path) {
-            return if repo.head().is_ok() {
-                Err(RepoError::Validation(format!(
-                    "Cannot handle existing {SYNC_REPO_NAME} repository history yet.",
-                )))
-            } else {
-                Ok(repo)
-            };
-        };
-
-        let mut options = RepositoryInitOptions::new();
-        let options = options.initial_head("main");
-
-        Ok(Repository::init_opts(path, &options)?)
-    }
-
-    pub fn copy_author_commits(&mut self, repos_to_copy: Vec<CopyRepo>) -> Result<(), RepoError> {
+    pub fn copy_matching_commits(
+        &mut self,
+        repos_to_copy: &Vec<CopyRepo>,
+    ) -> Result<(), RepoError> {
         let mut commit_iters = Vec::with_capacity(repos_to_copy.len());
 
         for repo in repos_to_copy.iter() {
@@ -99,7 +101,7 @@ impl SyncRepo<'_> {
                 let (repo_name, commit_count, commit_iter) = item;
                 let commit = commit_iter.next().unwrap();
 
-                self.copy_commit(&commit)?;
+                self.copy_author_commit(&commit)?;
 
                 if commit_iter.len() == 0 {
                     println!("Synced {} commit(s) from {}.", commit_count, repo_name);
@@ -110,33 +112,49 @@ impl SyncRepo<'_> {
         Ok(())
     }
 
-    fn copy_commit(&mut self, commit: &Commit) -> Result<(), RepoError> {
-        let SyncRepo {
-            author,
-            repo,
-            tree,
-            ref mut parents,
-        } = self;
+    fn copy_author_commit(&mut self, commit: &Commit) -> Result<(), RepoError> {
+        let commit_id = {
+            let tree = Self::create_empty_tree(&self.repo)?;
 
-        let parents_ref: Vec<&Commit> = parents.iter().collect();
-        let EmailAddress(email) = author.signature_email();
-        let signature = Signature::new(&author.name, email.as_str(), &commit.author().when())?;
+            let parents = self.get_parent_commits()?;
+            let parents: Vec<&Commit> = parents.iter().collect();
 
-        let commit_id = repo.commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            commit.message().unwrap(),
-            &tree,
-            &parents_ref,
-        )?;
+            let signature = Signature::new(
+                &self.author.name,
+                self.author.signature_email().0.as_str(),
+                &commit.author().when(),
+            )?;
 
-        parents.clear();
-        parents.push(repo.find_commit(commit_id)?);
+            self.repo.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                commit.message().unwrap(),
+                &tree,
+                &parents,
+            )?
+        };
+
+        self.parents.clear();
+        self.parents.push(commit_id);
 
         Ok(())
     }
 
+    fn get_parent_commits(&self) -> Result<Vec<Commit>, RepoError> {
+        let mut commit_refs = Vec::with_capacity(self.parents.len());
+
+        for commit_id in self.parents.iter() {
+            commit_refs.push(self.repo.find_commit(*commit_id)?)
+        }
+
+        let commit_refs = commit_refs;
+
+        Ok(commit_refs)
+    }
+
+    // Since the commits never contain any changes, we always (re)use an empty
+    // tree object. There's no file/directory information to include.
     fn create_empty_tree(repo: &Repository) -> Result<Tree, RepoError> {
         let tree = repo.treebuilder(None)?.write()?;
         let tree = repo.find_tree(tree)?;
@@ -152,7 +170,7 @@ pub struct CopyRepo<'repo> {
 }
 
 impl CopyRepo<'_> {
-    pub fn new_from_all_in_dir<'repo>(
+    pub fn read_all_in_dir<'repo>(
         dir: &'repo Path,
         author: &'repo Author,
     ) -> Result<Vec<CopyRepo<'repo>>, RepoError> {
@@ -167,7 +185,7 @@ impl CopyRepo<'_> {
                     "Cannot read {SYNC_REPO_NAME} repository as input."
                 )))
             } else {
-                repositories.push(Self::from(
+                repositories.push(Self::new(
                     Repository::open(dir)?,
                     String::from(dir_name.to_str().unwrap()),
                     author,
@@ -188,7 +206,7 @@ impl CopyRepo<'_> {
                 continue;
             }
 
-            repositories.push(Self::from(
+            repositories.push(Self::new(
                 Repository::open(entry_path)?,
                 entry_name.into_string().unwrap(),
                 author,
@@ -208,7 +226,7 @@ impl CopyRepo<'_> {
         &self.name
     }
 
-    pub fn get_author_commits(&self) -> Result<Vec<Commit>, RepoError> {
+    fn get_author_commits(&self) -> Result<Vec<Commit>, RepoError> {
         let mut revision_walker = self.repo.revwalk()?;
 
         revision_walker.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
@@ -244,7 +262,7 @@ impl CopyRepo<'_> {
         dir.join(".git").is_dir()
     }
 
-    fn from<'repo>(repo: Repository, name: String, author: &'repo Author) -> CopyRepo<'repo> {
+    fn new<'repo>(repo: Repository, name: String, author: &'repo Author) -> CopyRepo<'repo> {
         CopyRepo { repo, name, author }
     }
 }
