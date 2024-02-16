@@ -37,8 +37,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         author_emails,
     } = Arguments::parse();
 
-    let author = Author::new(&author_name, &author_emails)?;
-
     if !input_dir.is_dir() {
         return Err("Input directory is invalid".into());
     }
@@ -47,13 +45,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("Output directory is invalid".into());
     }
 
-    let sync_repo = output_dir.join(SYNC_REPO_NAME);
-    let sync_repo = SyncRepo::read_or_create_repo_from_path(&sync_repo)?;
-    let mut sync_repo = SyncRepo::new(&sync_repo, &author)?;
+    let author = Author::new(&author_name, &author_emails)?;
+    let mut sync_repo = SyncRepo::read_or_create(&output_dir, &author)?;
+    let repos_to_copy = CopyRepo::read_all_in_dir(&input_dir, &author)?;
 
-    let repos_to_copy = CopyRepo::new_from_all_in_dir(&input_dir, &author)?;
-
-    sync_repo.copy_author_commits(repos_to_copy)?;
+    sync_repo.copy_matching_commits(&repos_to_copy)?;
 
     Ok(())
 }
