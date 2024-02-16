@@ -25,7 +25,7 @@ impl Author<'_> {
         name: &'repo str,
         emails: &'repo Vec<EmailAddress>,
     ) -> Result<Author<'repo>, RepoError> {
-        if emails.len() > 0 {
+        if !emails.is_empty() {
             Ok(Author { name, emails })
         } else {
             Err(RepoError::Validation(
@@ -35,7 +35,7 @@ impl Author<'_> {
     }
 
     pub fn signature_email(&self) -> &EmailAddress {
-        &self.emails.get(0).unwrap()
+        self.emails.first().unwrap()
     }
 }
 
@@ -67,7 +67,7 @@ impl SyncRepo<'_> {
             let mut options = RepositoryInitOptions::new();
             let options = options.initial_head("main");
 
-            repo = Some(Repository::init_opts(&repo_path, &options)?);
+            repo = Some(Repository::init_opts(&repo_path, options)?);
         }
 
         let repo = repo.unwrap();
@@ -103,7 +103,7 @@ impl SyncRepo<'_> {
 
                 self.copy_author_commit(&commit)?;
 
-                if commit_iter.len() == 0 {
+                if commit_iter.len().eq(&0) {
                     println!("Synced {} commit(s) from {}.", commit_count, repo_name);
                 }
             }
@@ -120,7 +120,7 @@ impl SyncRepo<'_> {
             let parents: Vec<&Commit> = parents.iter().collect();
 
             let signature = Signature::new(
-                &self.author.name,
+                self.author.name,
                 self.author.signature_email().0.as_str(),
                 &commit.author().when(),
             )?;
@@ -176,11 +176,11 @@ impl CopyRepo<'_> {
     ) -> Result<Vec<CopyRepo<'repo>>, RepoError> {
         let mut repositories = Vec::new();
 
-        if Self::is_dir_git_repo(&dir) {
+        if Self::is_dir_git_repo(dir) {
             let dir_absolute = dir.canonicalize()?;
             let dir_name = dir_absolute.file_name().unwrap();
 
-            return if dir_name == SYNC_REPO_NAME {
+            return if dir_name.eq(SYNC_REPO_NAME) {
                 Err(RepoError::Validation(format!(
                     "Cannot read {SYNC_REPO_NAME} repository as input."
                 )))
@@ -202,7 +202,9 @@ impl CopyRepo<'_> {
 
             if !Self::is_dir_git_repo(&entry_path) {
                 continue;
-            } else if entry_name == SYNC_REPO_NAME {
+            }
+
+            if entry_name.eq(SYNC_REPO_NAME) {
                 continue;
             }
 
@@ -245,7 +247,7 @@ impl CopyRepo<'_> {
                 self.author
                     .emails
                     .iter()
-                    .any(|EmailAddress(email)| email == commit_author_email)
+                    .any(|EmailAddress(email)| email.eq(commit_author_email))
             };
 
             if !does_email_match {
