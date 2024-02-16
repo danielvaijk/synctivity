@@ -1,3 +1,5 @@
+#![deny(clippy::all)]
+
 use crate::repo::{Author, CopyRepo, SyncRepo};
 use clap::{Parser, ValueHint};
 use email::EmailAddress;
