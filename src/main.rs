@@ -1,13 +1,18 @@
 #![deny(clippy::all)]
 
-use crate::repo::{Author, CopyRepo, SyncRepo};
+use crate::author::Author;
+use crate::repo_copy::CopyRepo;
+use crate::repo_sync::SyncRepo;
 use clap::{Parser, ValueHint};
 use email::EmailAddress;
 use std::error::Error;
 use std::path::PathBuf;
 
+mod author;
 mod email;
-mod repo;
+mod error;
+mod repo_copy;
+mod repo_sync;
 
 #[derive(Parser)]
 struct Arguments {
