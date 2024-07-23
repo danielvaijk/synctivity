@@ -1,7 +1,7 @@
 use crate::author::Author;
 use crate::email::EmailAddress;
-use crate::error::RepoError;
 use crate::SYNC_REPO_NAME;
+use anyhow::{bail, Result};
 use git2::{Commit, Repository, Sort};
 use std::path::Path;
 
@@ -15,26 +15,24 @@ impl CopyRepo<'_> {
     pub fn read_all_in_dir<'repo>(
         dir: &'repo Path,
         author: &'repo Author,
-    ) -> Result<Vec<CopyRepo<'repo>>, RepoError> {
+    ) -> Result<Vec<CopyRepo<'repo>>> {
         let mut repositories = Vec::new();
 
         if Self::is_dir_git_repo(dir) {
             let dir_absolute = dir.canonicalize()?;
             let dir_name = dir_absolute.file_name().unwrap();
 
-            return if dir_name.eq(SYNC_REPO_NAME) {
-                Err(RepoError::Validation(format!(
-                    "Cannot read {SYNC_REPO_NAME} repository as input."
-                )))
-            } else {
-                repositories.push(Self::new(
-                    Repository::open(dir)?,
-                    String::from(dir_name.to_str().unwrap()),
-                    author,
-                ));
+            if dir_name.eq(SYNC_REPO_NAME) {
+                bail!("cannot read {SYNC_REPO_NAME} repository as input")
+            }
 
-                Ok(repositories)
-            };
+            repositories.push(Self::new(
+                Repository::open(dir)?,
+                String::from(dir_name.to_str().unwrap()),
+                author,
+            ));
+
+            return Ok(repositories);
         }
 
         for entry in dir.read_dir()? {
@@ -58,19 +56,17 @@ impl CopyRepo<'_> {
         }
 
         if repositories.is_empty() {
-            Err(RepoError::Validation(
-                "No repositories found in the input directory".into(),
-            ))
-        } else {
-            Ok(repositories)
+            bail!("no repositories found in the input directory")
         }
+
+        Ok(repositories)
     }
 
     pub fn name(&self) -> &String {
         &self.name
     }
 
-    pub fn get_author_commits(&self) -> Result<Vec<Commit>, RepoError> {
+    pub fn get_author_commits(&self) -> Result<Vec<Commit>> {
         let mut revision_walker = self.repo.revwalk()?;
 
         revision_walker.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)?;
