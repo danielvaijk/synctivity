@@ -1,4 +1,4 @@
-use crate::email::EmailAddress;
+use super::email::EmailAddress;
 use anyhow::Result;
 use thiserror::Error;
 

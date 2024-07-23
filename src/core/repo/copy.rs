@@ -1,6 +1,4 @@
-use crate::author::Author;
-use crate::email::EmailAddress;
-use crate::SYNC_REPO_NAME;
+use crate::core::{Author, EmailAddress, SYNC_REPO_NAME};
 use anyhow::{bail, Result};
 use git2::{Commit, Repository, Sort};
 use std::path::Path;

@@ -1,6 +1,4 @@
-use crate::author::Author;
-use crate::repo::copy::CopyRepo;
-use crate::SYNC_REPO_NAME;
+use crate::core::{Author, CopyRepo, SYNC_REPO_NAME};
 use anyhow::{bail, Result};
 use git2::{Commit, Oid, Repository, RepositoryInitOptions, Signature, Tree};
 use std::path::Path;
