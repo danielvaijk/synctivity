@@ -1,18 +1,17 @@
 #![deny(clippy::all)]
 
 use crate::author::Author;
-use crate::repo_copy::CopyRepo;
-use crate::repo_sync::SyncRepo;
+use crate::repo::copy::CopyRepo;
+use crate::repo::sync::SyncRepo;
+use anyhow::{bail, Result};
 use clap::{Parser, ValueHint};
 use email::EmailAddress;
-use std::error::Error;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 mod author;
 mod email;
-mod error;
-mod repo_copy;
-mod repo_sync;
+mod repo;
 
 #[derive(Parser)]
 struct Arguments {
@@ -36,7 +35,7 @@ struct Arguments {
 
 const SYNC_REPO_NAME: &str = "synctivity";
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<ExitCode> {
     let Arguments {
         input_dir,
         output_dir,
@@ -45,11 +44,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     } = Arguments::parse();
 
     if !input_dir.is_dir() {
-        return Err("Input directory is invalid".into());
+        bail!("input directory is invalid");
     }
 
     if !output_dir.is_dir() {
-        return Err("Output directory is invalid".into());
+        bail!("output directory is invalid");
     }
 
     let author = Author::new(&author_name, &author_emails)?;
@@ -58,5 +57,5 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     sync_repo.copy_matching_commits(&repos_to_copy)?;
 
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }

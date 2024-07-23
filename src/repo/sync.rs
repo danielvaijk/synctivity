@@ -1,7 +1,7 @@
 use crate::author::Author;
-use crate::error::RepoError;
-use crate::repo_copy::CopyRepo;
+use crate::repo::copy::CopyRepo;
 use crate::SYNC_REPO_NAME;
+use anyhow::{bail, Result};
 use git2::{Commit, Oid, Repository, RepositoryInitOptions, Signature, Tree};
 use std::path::Path;
 
@@ -15,18 +15,16 @@ impl SyncRepo<'_> {
     pub fn read_or_create<'repo>(
         path: &'repo Path,
         author: &'repo Author,
-    ) -> Result<SyncRepo<'repo>, RepoError> {
+    ) -> Result<SyncRepo<'repo>> {
         let mut repo: Option<Repository> = None;
         let repo_path = path.join(SYNC_REPO_NAME);
 
         if let Ok(existing_repo) = Repository::open(&repo_path) {
             if existing_repo.head().is_ok() {
-                return Err(RepoError::Validation(format!(
-                    "Cannot handle existing {SYNC_REPO_NAME} repository history yet.",
-                )));
-            } else {
-                repo = Some(existing_repo);
-            };
+                bail!("Cannot handle existing {SYNC_REPO_NAME} repository history yet.",);
+            }
+
+            repo = Some(existing_repo);
         };
 
         if repo.is_none() {
@@ -49,10 +47,7 @@ impl SyncRepo<'_> {
         })
     }
 
-    pub fn copy_matching_commits(
-        &mut self,
-        repos_to_copy: &Vec<CopyRepo>,
-    ) -> Result<(), RepoError> {
+    pub fn copy_matching_commits(&mut self, repos_to_copy: &Vec<CopyRepo>) -> Result<()> {
         let mut commit_iters = Vec::with_capacity(repos_to_copy.len());
 
         for repo in repos_to_copy.iter() {
@@ -78,7 +73,7 @@ impl SyncRepo<'_> {
         Ok(())
     }
 
-    fn copy_author_commit(&mut self, commit: &Commit) -> Result<(), RepoError> {
+    fn copy_author_commit(&mut self, commit: &Commit) -> Result<()> {
         let commit_id = {
             let tree = Self::create_empty_tree(&self.repo)?;
 
@@ -107,7 +102,7 @@ impl SyncRepo<'_> {
         Ok(())
     }
 
-    fn get_parent_commits(&self) -> Result<Vec<Commit>, RepoError> {
+    fn get_parent_commits(&self) -> Result<Vec<Commit>> {
         let mut commit_refs = Vec::with_capacity(self.parents.len());
 
         for commit_id in self.parents.iter() {
@@ -121,7 +116,7 @@ impl SyncRepo<'_> {
 
     // Since the commits never contain any changes, we always (re)use an empty
     // tree object. There's no file/directory information to include.
-    fn create_empty_tree(repo: &Repository) -> Result<Tree, RepoError> {
+    fn create_empty_tree(repo: &Repository) -> Result<Tree> {
         let tree = repo.treebuilder(None)?.write()?;
         let tree = repo.find_tree(tree)?;
 
