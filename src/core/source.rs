@@ -1,6 +1,7 @@
 use crate::core::TARGET_REPO_NAME;
 use anyhow::{bail, Result};
 use git2::{Commit, Repository, Sort};
+use std::collections::HashSet;
 use std::path::Path;
 
 pub struct SourceRepo {
@@ -11,6 +12,7 @@ pub struct SourceRepo {
 
 impl SourceRepo {
     pub fn read_all_in_dir(dir: &Path) -> Result<Vec<SourceRepo>> {
+        let mut seen_remotes = HashSet::new();
         let mut repositories = Vec::new();
 
         if Self::is_dir_git_repo(dir) {
@@ -45,7 +47,11 @@ impl SourceRepo {
             let repo = Repository::open(entry_path)?;
             let repo = Self::new(repo)?;
 
-            repositories.push(repo);
+            if seen_remotes.insert(repo.remote_url.clone()) {
+                repositories.push(repo);
+            } else {
+                println!("Ignoring duplicate repository at {}.", repo.remote_url)
+            }
         }
 
         if repositories.is_empty() {
