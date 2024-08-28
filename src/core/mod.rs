@@ -1,7 +1,7 @@
-pub mod copy;
-pub mod sync;
+pub mod source;
+pub mod target;
 
-pub use copy::CopyRepo;
-pub use sync::SyncRepo;
+pub use source::SourceRepo;
+pub use target::TargetRepo;
 
-const SYNC_REPO_NAME: &str = "synctivity";
+const TARGET_REPO_NAME: &str = "synctivity";

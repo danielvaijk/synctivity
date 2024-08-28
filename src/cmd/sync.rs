@@ -1,4 +1,4 @@
-use crate::core::{CopyRepo, SyncRepo};
+use crate::core::{SourceRepo, TargetRepo};
 use anyhow::{bail, Result};
 use clap::Parser;
 use clap::ValueHint;
@@ -29,8 +29,8 @@ pub fn exec(args: SyncCommandArgs) -> Result<()> {
         bail!("output directory is invalid");
     }
 
-    let mut sync_repo = SyncRepo::read_or_create(&output_dir)?;
-    let repos_to_copy = CopyRepo::read_all_in_dir(&input_dir)?;
+    let mut target_repo = TargetRepo::read_or_create(&output_dir)?;
+    let source_repos = SourceRepo::read_all_in_dir(&input_dir)?;
 
-    sync_repo.copy_matching_commits(&repos_to_copy)
+    target_repo.copy_matching_commits(&source_repos)
 }
