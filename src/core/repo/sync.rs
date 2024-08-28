@@ -1,19 +1,15 @@
-use crate::core::{Author, CopyRepo, SYNC_REPO_NAME};
+use crate::core::{CopyRepo, SYNC_REPO_NAME};
 use anyhow::{bail, Result};
 use git2::{Commit, Oid, Repository, RepositoryInitOptions, Signature, Tree};
 use std::path::Path;
 
-pub struct SyncRepo<'repo> {
+pub struct SyncRepo {
     repo: Repository,
-    author: &'repo Author<'repo>,
     parents: Vec<Oid>,
 }
 
-impl SyncRepo<'_> {
-    pub fn read_or_create<'repo>(
-        path: &'repo Path,
-        author: &'repo Author,
-    ) -> Result<SyncRepo<'repo>> {
+impl SyncRepo {
+    pub fn read_or_create(path: &Path) -> Result<SyncRepo> {
         let mut repo: Option<Repository> = None;
         let repo_path = path.join(SYNC_REPO_NAME);
 
@@ -38,11 +34,7 @@ impl SyncRepo<'_> {
         // so there isn't a parent commit ID to start from.
         let parents: Vec<Oid> = Vec::new();
 
-        Ok(SyncRepo {
-            repo,
-            author,
-            parents,
-        })
+        Ok(SyncRepo { repo, parents })
     }
 
     pub fn copy_matching_commits(&mut self, repos_to_copy: &Vec<CopyRepo>) -> Result<()> {
@@ -78,9 +70,11 @@ impl SyncRepo<'_> {
             let parents = self.get_parent_commits()?;
             let parents: Vec<&Commit> = parents.iter().collect();
 
+            let commit_author = commit.author();
+
             let signature = Signature::new(
-                self.author.name,
-                self.author.signature_email().0.as_str(),
+                commit_author.name().unwrap(),
+                commit_author.email().unwrap(),
                 &commit.author().when(),
             )?;
 
@@ -106,8 +100,6 @@ impl SyncRepo<'_> {
         for commit_id in self.parents.iter() {
             commit_refs.push(self.repo.find_commit(*commit_id)?)
         }
-
-        let commit_refs = commit_refs;
 
         Ok(commit_refs)
     }

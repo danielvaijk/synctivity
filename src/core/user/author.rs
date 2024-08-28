@@ -1,31 +1,24 @@
-use super::email::EmailAddress;
 use anyhow::Result;
-use thiserror::Error;
+use git2::Config;
 
-#[derive(Error, Debug)]
-pub enum AuthorError {
-    #[error("an author requires at least one email address")]
-    EmailRequired,
+pub struct Author {
+    name: String,
+    email: String,
 }
 
-pub struct Author<'author> {
-    pub name: &'author str,
-    pub emails: &'author Vec<EmailAddress>,
-}
+impl Author {
+    pub fn new(git_config: Config) -> Result<Author> {
+        let name = git_config.get_string("user.name")?;
+        let email = git_config.get_string("user.email")?;
 
-impl Author<'_> {
-    pub fn new<'author>(
-        name: &'author str,
-        emails: &'author Vec<EmailAddress>,
-    ) -> Result<Author<'author>, AuthorError> {
-        if !emails.is_empty() {
-            Ok(Author { name, emails })
-        } else {
-            Err(AuthorError::EmailRequired)
-        }
+        Ok(Author { name, email })
     }
 
-    pub fn signature_email(&self) -> &EmailAddress {
-        self.emails.first().unwrap()
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn get_email(&self) -> &str {
+        &self.email
     }
 }

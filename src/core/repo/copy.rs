@@ -1,19 +1,16 @@
-use crate::core::{Author, EmailAddress, SYNC_REPO_NAME};
+use crate::core::{Author, SYNC_REPO_NAME};
 use anyhow::{bail, Result};
 use git2::{Commit, Repository, Sort};
 use std::path::Path;
 
-pub struct CopyRepo<'repo> {
+pub struct CopyRepo {
     repo: Repository,
     name: String,
-    author: &'repo Author<'repo>,
+    author: Author,
 }
 
-impl CopyRepo<'_> {
-    pub fn read_all_in_dir<'repo>(
-        dir: &'repo Path,
-        author: &'repo Author,
-    ) -> Result<Vec<CopyRepo<'repo>>> {
+impl CopyRepo {
+    pub fn read_all_in_dir(dir: &Path) -> Result<Vec<CopyRepo>> {
         let mut repositories = Vec::new();
 
         if Self::is_dir_git_repo(dir) {
@@ -24,11 +21,10 @@ impl CopyRepo<'_> {
                 bail!("cannot read {SYNC_REPO_NAME} repository as input")
             }
 
-            repositories.push(Self::new(
-                Repository::open(dir)?,
-                String::from(dir_name.to_str().unwrap()),
-                author,
-            ));
+            let repo = Repository::open(dir)?;
+            let repo = Self::new(repo)?;
+
+            repositories.push(repo);
 
             return Ok(repositories);
         }
@@ -46,11 +42,10 @@ impl CopyRepo<'_> {
                 continue;
             }
 
-            repositories.push(Self::new(
-                Repository::open(entry_path)?,
-                entry_name.into_string().unwrap(),
-                author,
-            ));
+            let repo = Repository::open(entry_path)?;
+            let repo = Self::new(repo)?;
+
+            repositories.push(repo);
         }
 
         if repositories.is_empty() {
@@ -80,10 +75,7 @@ impl CopyRepo<'_> {
                 let commit_author = commit.author();
                 let commit_author_email = commit_author.email().unwrap_or("unknown");
 
-                self.author
-                    .emails
-                    .iter()
-                    .any(|EmailAddress(email)| email.eq(commit_author_email))
+                self.author.get_email().eq(commit_author_email)
             };
 
             if !does_email_match {
@@ -100,7 +92,11 @@ impl CopyRepo<'_> {
         dir.join(".git").is_dir()
     }
 
-    fn new<'repo>(repo: Repository, name: String, author: &'repo Author) -> CopyRepo<'repo> {
-        CopyRepo { repo, name, author }
+    fn new(repo: Repository) -> Result<CopyRepo> {
+        let config = repo.config()?;
+        let name = config.get_string("remote.origin.url")?;
+        let author = Author::new(config)?;
+
+        Ok(CopyRepo { repo, name, author })
     }
 }
