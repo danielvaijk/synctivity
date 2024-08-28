@@ -1,4 +1,4 @@
-use crate::core::{Author, SYNC_REPO_NAME};
+use crate::core::SYNC_REPO_NAME;
 use anyhow::{bail, Result};
 use git2::{Commit, Repository, Sort};
 use std::path::Path;
@@ -6,7 +6,8 @@ use std::path::Path;
 pub struct CopyRepo {
     repo: Repository,
     name: String,
-    author: Author,
+    author_name: String,
+    author_email: String,
 }
 
 impl CopyRepo {
@@ -75,7 +76,7 @@ impl CopyRepo {
                 let commit_author = commit.author();
                 let commit_author_email = commit_author.email().unwrap_or("unknown");
 
-                self.author.get_email().eq(commit_author_email)
+                self.author_email.eq(commit_author_email)
             };
 
             if !does_email_match {
@@ -93,10 +94,13 @@ impl CopyRepo {
     }
 
     fn new(repo: Repository) -> Result<CopyRepo> {
-        let config = repo.config()?;
-        let name = config.get_string("remote.origin.url")?;
-        let author = Author::new(config)?;
+        let repo_config = repo.config()?;
 
-        Ok(CopyRepo { repo, name, author })
+        Ok(CopyRepo {
+            repo,
+            name: repo_config.get_string("remote.origin.url")?,
+            author_name: repo_config.get_string("user.name")?,
+            author_email: repo_config.get_string("user.email")?,
+        })
     }
 }
