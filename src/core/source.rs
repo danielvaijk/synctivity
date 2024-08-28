@@ -6,7 +6,6 @@ use std::path::Path;
 pub struct SourceRepo {
     repo: Repository,
     remote_url: String,
-    author_name: String,
     author_email: String,
 }
 
@@ -99,7 +98,6 @@ impl SourceRepo {
         Ok(SourceRepo {
             repo,
             remote_url: repo_config.get_string("remote.origin.url")?,
-            author_name: repo_config.get_string("user.name")?,
             author_email: repo_config.get_string("user.email")?,
         })
     }
