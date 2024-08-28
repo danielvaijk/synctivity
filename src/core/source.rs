@@ -1,25 +1,25 @@
-use crate::core::SYNC_REPO_NAME;
+use crate::core::TARGET_REPO_NAME;
 use anyhow::{bail, Result};
 use git2::{Commit, Repository, Sort};
 use std::path::Path;
 
-pub struct CopyRepo {
+pub struct SourceRepo {
     repo: Repository,
-    name: String,
+    remote_url: String,
     author_name: String,
     author_email: String,
 }
 
-impl CopyRepo {
-    pub fn read_all_in_dir(dir: &Path) -> Result<Vec<CopyRepo>> {
+impl SourceRepo {
+    pub fn read_all_in_dir(dir: &Path) -> Result<Vec<SourceRepo>> {
         let mut repositories = Vec::new();
 
         if Self::is_dir_git_repo(dir) {
             let dir_absolute = dir.canonicalize()?;
             let dir_name = dir_absolute.file_name().unwrap();
 
-            if dir_name.eq(SYNC_REPO_NAME) {
-                bail!("cannot read {SYNC_REPO_NAME} repository as input")
+            if dir_name.eq(TARGET_REPO_NAME) {
+                bail!("cannot read {TARGET_REPO_NAME} repository as input")
             }
 
             let repo = Repository::open(dir)?;
@@ -39,7 +39,7 @@ impl CopyRepo {
                 continue;
             }
 
-            if entry_name.eq(SYNC_REPO_NAME) {
+            if entry_name.eq(TARGET_REPO_NAME) {
                 continue;
             }
 
@@ -56,8 +56,8 @@ impl CopyRepo {
         Ok(repositories)
     }
 
-    pub fn name(&self) -> &String {
-        &self.name
+    pub fn name(&self) -> &str {
+        &self.remote_url
     }
 
     pub fn get_author_commits(&self) -> Result<Vec<Commit>> {
@@ -93,12 +93,12 @@ impl CopyRepo {
         dir.join(".git").is_dir()
     }
 
-    fn new(repo: Repository) -> Result<CopyRepo> {
+    fn new(repo: Repository) -> Result<SourceRepo> {
         let repo_config = repo.config()?;
 
-        Ok(CopyRepo {
+        Ok(SourceRepo {
             repo,
-            name: repo_config.get_string("remote.origin.url")?,
+            remote_url: repo_config.get_string("remote.origin.url")?,
             author_name: repo_config.get_string("user.name")?,
             author_email: repo_config.get_string("user.email")?,
         })

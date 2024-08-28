@@ -1,21 +1,21 @@
-use crate::core::{CopyRepo, SYNC_REPO_NAME};
+use crate::core::{SourceRepo, TARGET_REPO_NAME};
 use anyhow::{bail, Result};
 use git2::{Commit, Oid, Repository, RepositoryInitOptions, Signature, Tree};
 use std::path::Path;
 
-pub struct SyncRepo {
+pub struct TargetRepo {
     repo: Repository,
     parents: Vec<Oid>,
 }
 
-impl SyncRepo {
-    pub fn read_or_create(path: &Path) -> Result<SyncRepo> {
+impl TargetRepo {
+    pub fn read_or_create(path: &Path) -> Result<TargetRepo> {
         let mut repo: Option<Repository> = None;
-        let repo_path = path.join(SYNC_REPO_NAME);
+        let repo_path = path.join(TARGET_REPO_NAME);
 
         if let Ok(existing_repo) = Repository::open(&repo_path) {
             if existing_repo.head().is_ok() {
-                bail!("Cannot handle existing {SYNC_REPO_NAME} repository history yet.",);
+                bail!("Cannot handle existing {TARGET_REPO_NAME} repository history yet.",);
             }
 
             repo = Some(existing_repo);
@@ -34,10 +34,10 @@ impl SyncRepo {
         // so there isn't a parent commit ID to start from.
         let parents: Vec<Oid> = Vec::new();
 
-        Ok(SyncRepo { repo, parents })
+        Ok(TargetRepo { repo, parents })
     }
 
-    pub fn copy_matching_commits(&mut self, repos_to_copy: &Vec<CopyRepo>) -> Result<()> {
+    pub fn copy_matching_commits(&mut self, repos_to_copy: &Vec<SourceRepo>) -> Result<()> {
         let mut commit_iters = Vec::with_capacity(repos_to_copy.len());
 
         for repo in repos_to_copy.iter() {
