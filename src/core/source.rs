@@ -1,4 +1,4 @@
-use crate::core::TARGET_REPO_NAME;
+use crate::config::Settings;
 use anyhow::{bail, Result};
 use git2::{Commit, Repository, Sort};
 use std::collections::HashSet;
@@ -11,36 +11,25 @@ pub struct SourceRepo {
 }
 
 impl SourceRepo {
-    pub fn read_all_in_dir(dir: &Path) -> Result<Vec<SourceRepo>> {
+    pub fn read_all_in_dir(settings: &Settings, input_dir: &Path) -> Result<Vec<SourceRepo>> {
         let mut seen_remotes = HashSet::new();
         let mut repositories = Vec::new();
 
-        if Self::is_dir_git_repo(dir) {
-            let dir_absolute = dir.canonicalize()?;
-            let dir_name = dir_absolute.file_name().unwrap();
+        let input_dir = input_dir.canonicalize()?;
+        let config_dir = settings.get_base_dir().canonicalize()?;
 
-            if dir_name.eq(TARGET_REPO_NAME) {
-                bail!("cannot read {TARGET_REPO_NAME} repository as input")
-            }
-
-            let repo = Repository::open(dir)?;
-            let repo = Self::new(repo)?;
-
-            repositories.push(repo);
-
-            return Ok(repositories);
+        if config_dir.eq(&input_dir) {
+            bail!("cannot use configuration directory as input")
         }
 
-        for entry in dir.read_dir()? {
-            let entry = entry?;
-            let entry_path = entry.path();
-            let entry_name = entry.file_name();
+        if Self::is_dir_git_repo(&input_dir) {
+            bail!("cannot use a direct repository as input")
+        }
+
+        for entry in input_dir.read_dir()? {
+            let entry_path = entry?.path();
 
             if !Self::is_dir_git_repo(&entry_path) {
-                continue;
-            }
-
-            if entry_name.eq(TARGET_REPO_NAME) {
                 continue;
             }
 

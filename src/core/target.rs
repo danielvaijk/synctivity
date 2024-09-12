@@ -1,7 +1,8 @@
-use crate::core::{SourceRepo, TARGET_REPO_NAME};
+use crate::config::Settings;
+use crate::core::SourceRepo;
 use anyhow::{bail, Result};
 use git2::{Commit, Oid, Repository, RepositoryInitOptions, Signature, Tree};
-use std::path::Path;
+use std::path::PathBuf;
 
 pub struct TargetRepo {
     repo: Repository,
@@ -9,30 +10,22 @@ pub struct TargetRepo {
 }
 
 impl TargetRepo {
-    pub fn read_or_create(path: &Path) -> Result<TargetRepo> {
-        let mut repo: Option<Repository> = None;
-        let repo_path = path.join(TARGET_REPO_NAME);
+    pub fn create(settings: &Settings) -> Result<()> {
+        let mut options = RepositoryInitOptions::new();
+        let options = options.initial_head("main");
 
-        if let Ok(existing_repo) = Repository::open(&repo_path) {
-            if existing_repo.head().is_ok() {
-                bail!("Cannot handle existing {TARGET_REPO_NAME} repository history yet.",);
-            }
+        Repository::init_opts(TargetRepo::get_dir(settings), options).map(|_| Ok(()))?
+    }
 
-            repo = Some(existing_repo);
-        };
-
-        if repo.is_none() {
-            let mut options = RepositoryInitOptions::new();
-            let options = options.initial_head("main");
-
-            repo = Some(Repository::init_opts(&repo_path, options)?);
-        }
-
-        let repo = repo.unwrap();
-
+    pub fn load(settings: &Settings) -> Result<TargetRepo> {
         // We always start from scratch since we don't handle history delta's yet,
         // so there isn't a parent commit ID to start from.
         let parents: Vec<Oid> = Vec::new();
+        let repo = Repository::open(TargetRepo::get_dir(settings))?;
+
+        if repo.head().is_ok() {
+            bail!("Cannot handle existing repository history yet.");
+        }
 
         Ok(TargetRepo { repo, parents })
     }
@@ -111,5 +104,9 @@ impl TargetRepo {
         let tree = repo.find_tree(tree)?;
 
         Ok(tree)
+    }
+
+    fn get_dir(settings: &Settings) -> PathBuf {
+        settings.get_base_dir().join("repo")
     }
 }
